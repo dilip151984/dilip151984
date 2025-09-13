@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>XML → HTML5: Purchase Orders Explorer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 18px; color: #222; }
+    h1 { margin: 0 0 8px 0; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items:center; margin: 10px 0 18px 0; }
+    button, select { padding: 8px 10px; border-radius:6px; border:1px solid #ccc; background:#f7f7f7; cursor:pointer; }
+    input[type="file"] { padding:6px; }
+    textarea { width:100%; height:160px; font-family: monospace; font-size:13px; margin-top:8px; }
+    .grid { display:grid; grid-template-columns: 1fr 420px; gap:16px; align-items:start; }
+    .panel { border:1px solid #e0e0e0; padding:12px; border-radius:8px; background:#fff; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+    .summary { display:flex; gap:10px; flex-wrap:wrap; }
+    .card { border:1px solid #eee; padding:10px; border-radius:6px; min-width:220px; background:#fcfcff; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th, td { border:1px solid #e6e6e6; padding:6px 8px; text-align:left; font-size:13px; }
+    th { background:#fafafa; }
+    pre.json { white-space:pre-wrap; word-wrap:break-word; background:#f6f8fa; padding:8px; border-radius:6px; max-height:360px; overflow:auto; }
+    .small { font-size:13px; color:#555; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .badge { display:inline-block; padding:4px 8px; background:#eef6ff; color:#0a5cb6; border-radius:999px; font-weight:600; }
+    .po-header { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .muted { color:#666; font-size:13px; }
+    .search { padding:8px 10px; border:1px solid #ddd; border-radius:6px; width:100%; box-sizing:border-box; }
+    a.link { color:#0b66d0; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <h1>Purchase Orders — XML Explorer</h1>
+  <div class="small">Upload or paste an XML file (supports namespaces). This app extracts every node, attribute and text and presents structured views and exports.</div>
+
+  <div class="controls">
+    <input id="fileInput" type="file" accept=".xml,.txt" />
+    <button id="loadSample">Load sample XML (from your provided file)</button>
+    <button id="parseBtn">Parse & Extract</button>
+    <button id="treeBtn">Show XML Tree</button>
+    <button id="exportJsonBtn">Export Orders JSON</button>
+    <button id="exportOrdersCsvBtn">Export Orders CSV</button>
+    <button id="exportItemsCsvBtn">Export Items CSV</button>
+    <input id="searchBox" class="search" placeholder="Search orders / items (by text)"/>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <label class="small">Raw XML (you can edit or paste XML here):</label>
+        <textarea id="xmlInput" spellcheck="false"></textarea>
+        <div class="actions">
+          <button id="prettyBtn">Pretty-print XML</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </div>
+
+      <div id="results" class="panel" style="margin-top:12px;">
+        <div class="po-header">
+          <div>
+            <strong>Extracted PurchaseOrders</strong>
+            <div class="muted" id="summaryLine">No data parsed yet.</div>
+          </div>
+          <div id="counts" class="small"></div>
+        </div>
+
+        <div id="poList" style="margin-top:10px;"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <strong>XML Tree / Full JSON Representation</strong>
+        <div id="treeView" style="margin-top:8px;">
+          <div class="muted">Tree and JSON output will appear here after parsing.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // Sample XML from user's provided "My orders.txt"
+  const SAMPLE_XML = `<?xml version="1.0"?>
+<PurchaseOrders xmlns="www.contoso.com">
+  <PurchaseOrder
+      PurchaseOrderNumber="99503"
+      OrderDate="1999-10-20">
+    <Address Type="Shipping">
+      <Name>Ellen Adams</Name>
+      <Street>123 Maple Street</Street>
+      <City>Mill Valley</City>
+      <State>CA</State>
+      <Zip>10999</Zip>
+      <Country>USA</Country>
+    </Address>
+    <Address Type="Billing">
+      <Name>Tai Yee</Name>
+      <Street>8 Oak Avenue</Street>
+      <City>Old Town</City>
+      <State>PA</State>
+      <Zip>95819</Zip>
+      <Country>USA</Country>
+    </Address>
+    <DeliveryNotes>Please leave packages in shed by driveway.</DeliveryNotes>
+    <Items>
+      <Item PartNumber="872-AA">
+        <ProductName>Lawnmower</ProductName>
+        <Quantity>1</Quantity>
+        <USPrice>148.95</USPrice>
+        <Comment>Confirm this is electric</Comment>
+      </Item>
+      <Item PartNumber="926-AA">
+        <ProductName>Baby Monitor</ProductName>
+        <Quantity>2</Quantity>
+        <USPrice>39.98</USPrice>
+        <ShipDate>1999-05-21</ShipDate>
+      </Item>
+    </Items>
+  </PurchaseOrder>
+  <PurchaseOrder PurchaseOrderNumber="99505" OrderDate="1999-10-22">
+    <Address Type="Shipping">
+      <Name>Cristian Osorio</Name>
+      <Street>456 Main Street</Street>
+      <City>Buffalo</City>
+      <State>NY</State>
+      <Zip>98112</Zip>
+      <Country>USA</Country>
+    </Address>
+    <Address Type="Billing">
+      <Name>Cristian Osorio</Name>
+      <Street>456 Main Street</Street>
+      <City>Buffalo</City>
+      <State>NY</State>
+      <Zip>98112</Zip>
+      <Country>USA</Country>
+    </Address>
+    <DeliveryNotes>Please notify by email before shipping.</DeliveryNotes>
+    <Items>
+      <Item PartNumber="456-NM">
+        <ProductName>Power Supply</ProductName>
+        <Quantity>1</Quantity>
+        <USPrice>45.99</USPrice>
+      </Item>
+    </Items>
+  </PurchaseOrder>
+  <PurchaseOrder PurchaseOrderNumber="99504" OrderDate="1999-10-22">
+    <Address Type="Shipping">
+      <Name>Jessica Arnold</Name>
+      <Street>4055 Madison Ave</Street>
+      <City>Seattle</City>
+      <State>WA</State>
+      <Zip>98112</Zip>
+      <Country>USA</Country>
+    </Address>
+    <Address Type="Billing">
+      <Name>Jessica Arnold</Name>
+      <Street>4055 Madison Ave</Street>
+      <City>Buffalo</City>
+      <State>NY</State>
+      <Zip>98112</Zip>
+      <Country>USA</Country>
+    </Address>
+    <DeliveryNotes>Please don't deliver on Saturday.</DeliveryNotes>
+    <Items>
+      <Item PartNumber="898-AZ">
+        <ProductName>Computer Keyboard</ProductName>
+        <Quantity>1</Quantity>
+        <USPrice>29.99</USPrice>
+      </Item>
+      <Item PartNumber="898-AM">
+        <ProductName>Wireless Mouse</ProductName>
+        <Quantity>1</Quantity>
+        <USPrice>14.99</USPrice>
+      </Item>
+    </Items>
+  </PurchaseOrder>
+  <aw:PurchaseOrder
+    PONumber="11223"
+    Date="2000-01-15"
+    xmlns:aw="http://www.adventure-works.com">
+    <aw:ShippingAddress>
+      <aw:Name>Chris Preston</aw:Name>
+      <aw:Street>123 Main St.</aw:Street>
+      <aw:City>Seattle</aw:City>
+      <aw:State>WA</aw:State>
+      <aw:Zip>98113</aw:Zip>
+      <aw:Country>USA</aw:Country>
+    </aw:ShippingAddress>
+    <aw:BillingAddress>
+      <aw:Name>Chris Preston</aw:Name>
+      <aw:Street>123 Main St.</aw:Street>
+      <aw:City>Seattle</aw:City>
+      <aw:State>WA</aw:State>
+      <aw:Zip>98113</aw:Zip>
+      <aw:Country>USA</aw:Country>
+    </aw:BillingAddress>
+    <aw:DeliveryInstructions>Ship only complete order.</aw:DeliveryInstructions>
+    <aw:Item PartNum="LIT-01">
+      <aw:ProductID>Litware Networking Card</aw:ProductID>
+      <aw:Qty>1</aw:Qty>
+      <aw:Price>20.99</aw:Price>
+    </aw:Item>
+    <aw:Item PartNum="LIT-25">
+      <aw:ProductID>Litware 17in LCD Monitor</aw:ProductID>
+      <aw:Qty>1</aw:Qty>
+      <aw:Price>199.99</aw:Price>
+    </aw:Item>
+  </aw:PurchaseOrder>
+</PurchaseOrders>
+`;
+
+  // Utilities
+  const $ = id => document.getElementById(id);
+  const sanitize = s => (s == null ? '' : String(s));
+
+  // Convert an Element node into a generic JS object capturing attributes, namespace and children.
+  function elementToObject(el) {
+    const obj = {};
+    obj._tag = el.localName;
+    obj._namespace = el.namespaceURI || "";
+    // attributes
+    const attrObj = {};
+    for (let i=0;i<el.attributes.length;i++){
+      const a = el.attributes[i];
+      // show prefixed name when present
+      attrObj[a.name] = a.value;
+    }
+    if (Object.keys(attrObj).length) obj._attributes = attrObj;
+
+    // children
+    const childElements = Array.from(el.childNodes).filter(n => n.nodeType === 1);
+    const textNodes = Array.from(el.childNodes).filter(n => n.nodeType === 3 && n.nodeValue.trim() !== "");
+    if (textNodes.length && childElements.length === 0) {
+      // text-only element
+      obj._text = textNodes.map(t => t.nodeValue.trim()).join(" ");
+    } else if (childElements.length) {
+      // group children by name when possible
+      for (let child of childElements) {
+        const key = child.localName;
+        if (!obj[key]) obj[key] = [];
+        obj[key].push(elementToObject(child));
+      }
+    }
+    return obj;
+  }
+
+  // Extract PurchaseOrder elements (any namespace)
+  function extractOrders(xmlDoc) {
+    const orders = [];
+    // getElementsByTagNameNS with "*" gets purchase orders across namespaces.
+    const poNodes = Array.from(xmlDoc.getElementsByTagNameNS("*", "PurchaseOrder"));
+    for (let po of poNodes) {
+      const poObj = elementToObject(po);
+      // also keep a direct ref to attributes for convenience
+      poObj._attributes = poObj._attributes || {};
+      // find a friendly id: PurchaseOrderNumber, PONumber or UUID fallback to index
+      poObj._id = po.getAttribute("PurchaseOrderNumber") || po.getAttribute("PONumber") || po.getAttribute("PONo") || po.getAttribute("OrderNumber") || (poObj._attributes.PurchaseOrderNumber) || (poObj._attributes.PONumber) || null;
+      poObj._orderDate = po.getAttribute("OrderDate") || po.getAttribute("Date") || null;
+      // gather addresses and items in normalized arrays
+      const addresses = [];
+      // detect both <Address> and namespaced <ShippingAddress>/<BillingAddress>
+      const addressEls = Array.from(po.getElementsByTagNameNS("*", "Address"))
+        .concat(Array.from(po.getElementsByTagNameNS("*", "ShippingAddress")))
+        .concat(Array.from(po.getElementsByTagNameNS("*", "BillingAddress")));
+      for (let a of addressEls) addresses.push(elementToObject(a));
+      poObj._addresses = addresses;
+
+      // items: unify <Items>/<Item> and namespaced aw:Item
+      const itemEls = Array.from(po.getElementsByTagNameNS("*", "Item"));
+      // In some XML the Item nodes may be nested under Items; getElementsByTagNameNS already finds nested.
+      const items = itemEls.map(it => {
+        const itObj = elementToObject(it);
+        // copy attributes such as PartNumber or PartNum
+        itObj._attributes = itObj._attributes || {};
+        // include flat textual children for convenience
+        for (let k in itObj) {
+          if (!k.startsWith("_") && Array.isArray(itObj[k]) && itObj[k].length === 1 && itObj[k][0]._text) {
+            itObj[k] = itObj[k][0]._text;
+          }
+        }
+        return itObj;
+      });
+      poObj._items = items;
+      // top-level simple children (e.g., DeliveryNotes / aw:DeliveryInstructions)
+      // We'll capture direct text children that are not element containers
+      const directTextChildren = {};
+      for (let child of Array.from(po.childNodes)) {
+        if (child.nodeType === 1) {
+          const ln = child.localName;
+          // if child has only text, pull it
+          const onlyText = Array.from(child.childNodes).every(n => n.nodeType === 3 || (n.nodeType === 1 && n.childNodes.length===0));
+          const textValue = child.textContent.trim();
+          if (textValue && (child.children.length === 0)) {
+            directTextChildren[ln] = textValue;
+          }
+        }
+      }
+      poObj._direct = directTextChildren;
+      orders.push(poObj);
+    }
+    return orders;
+  }
+
+  // Utility to render list of purchase orders
+  function renderOrders(orders) {
+    const container = $("poList");
+    container.innerHTML = "";
+    if (!orders.length) {
+      container.innerHTML = "<div class='muted'>No PurchaseOrder elements found.</div>";
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    orders.forEach((po, idx) => {
+      const div = document.createElement("div");
+      div.className = "card";
+      const title = document.createElement("div");
+      title.innerHTML = `<strong>PurchaseOrder ${sanitize(po._tag || "PurchaseOrder")}</strong> <span class="muted">#${idx+1}</span>`;
+      const meta = document.createElement("div");
+      meta.style.marginTop = "6px";
+      meta.innerHTML = `<div class="small"><span class="badge">${sanitize(po._id || "—")}</span> &nbsp; Date: <strong>${sanitize(po._orderDate || po._direct.OrderDate || "—")}</strong></div>`;
+
+      // Addresses
+      const addrHtml = [];
+      if (po._addresses && po._addresses.length) {
+        for (let a of po._addresses) {
+          const type = (a._attributes && (a._attributes.Type || a._attributes.type)) || (a._tag && (a._tag.includes("Shipping") ? "Shipping" : a._tag.includes("Billing") ? "Billing" : "")) || "";
+          const name = a.Name ? (Array.isArray(a.Name) ? (a.Name[0]._text || "") : a.Name) : (a._text || "");
+          const street = (a.Street && (Array.isArray(a.Street) ? a.Street[0]._text : a.Street)) || "";
+          const city = (a.City && (Array.isArray(a.City) ? a.City[0]._text : a.City)) || "";
+          addrHtml.push(`<div><strong>${type || "Address"}</strong>: ${sanitize(name)} — ${sanitize(street)}, ${sanitize(city)}</div>`);
+        }
+      }
+
+      // Items table
+      let itemsTable = "";
+      if (po._items && po._items.length) {
+        // build columns union of item attributes and children
+        const cols = new Set();
+        po._items.forEach(it => {
+          if (it._attributes) Object.keys(it._attributes).forEach(k=>cols.add(k));
+          Object.keys(it).forEach(k => { if (!k.startsWith("_")) cols.add(k); });
+        });
+        const colsArr = Array.from(cols);
+        let rows = `<table><thead><tr><th>#</th>`;
+        colsArr.forEach(c => rows += `<th>${sanitize(c)}</th>`);
+        rows += `</tr></thead><tbody>`;
+        po._items.forEach((it, i) => {
+          rows += `<tr><td>${i+1}</td>`;
+          colsArr.forEach(c => {
+            let val = "";
+            if (it._attributes && it._attributes[c]) val = it._attributes[c];
+            else if (it[c]) val = it[c];
+            else val = "";
+            rows += `<td>${sanitize(val)}</td>`;
+          });
+          rows += `</tr>`;
+        });
+        rows += `</tbody></table>`;
+        itemsTable = rows;
+      }
+
+      // direct child simple elements
+      const directParts = [];
+      if (po._direct && Object.keys(po._direct).length) {
+        for (let k in po._direct) directParts.push(`<div><strong>${sanitize(k)}:</strong> ${sanitize(po._direct[k])}</div>`);
+      }
+
+      div.appendChild(title);
+      div.appendChild(meta);
+      if (addrHtml.length) {
+        const addrWrap = document.createElement("div");
+        addrWrap.style.marginTop = "8px";
+        addrWrap.innerHTML = `<div class="small"><strong>Addresses</strong></div>` + addrHtml.join("");
+        div.appendChild(addrWrap);
+      }
+      if (directParts.length) {
+        const d = document.createElement("div");
+        d.style.marginTop = "6px";
+        d.innerHTML = `<div class="small"><strong>Top-level fields</strong></div>` + directParts.join("");
+        div.appendChild(d);
+      }
+      if (itemsTable) {
+        const d = document.createElement("div");
+        d.style.marginTop = "8px";
+        d.innerHTML = `<div class="small"><strong>Items</strong></div>` + itemsTable;
+        div.appendChild(d);
+      }
+
+      // Show JSON for the PO (collapsible)
+      const pre = document.createElement("pre");
+      pre.className = "json";
+      pre.style.marginTop = "8px";
+      pre.textContent = JSON.stringify(po, null, 2);
+      div.appendChild(pre);
+
+      frag.appendChild(div);
+    });
+    container.appendChild(frag);
+  }
+
+  function showTreeAndJson(xmlDoc, orders) {
+    const treeDiv = $("treeView");
+    treeDiv.innerHTML = "";
+    // 1) show DOM tree visually (tag -> attributes)
+    const treeBox = document.createElement("div");
+    treeBox.className = "small";
+    treeBox.innerHTML = "<strong>DOM Tree (simplified)</strong>";
+    const build = (node, depth=0) => {
+      const pad = "&nbsp;".repeat(depth * 4);
+      if (node.nodeType === 1) {
+        let attrs = "";
+        for (let i=0;i<node.attributes.length;i++){
+          const a = node.attributes[i];
+          attrs += ` <em>${a.name}="${a.value}"</em>`;
+        }
+        const ns = node.namespaceURI ? `<span class='muted'>[ns:${node.namespaceURI}]</span>` : "";
+        const div = document.createElement("div");
+        div.innerHTML = `${pad}&lt;<strong>${sanitize(node.localName)}</strong>${attrs}&gt; ${ns}`;
+        treeBox.appendChild(div);
+        for (let child of Array.from(node.childNodes)) build(child, depth+1);
+        const div2 = document.createElement("div");
+        div2.innerHTML = `${pad}&lt;/${sanitize(node.localName)}&gt;`;
+        treeBox.appendChild(div2);
+      } else if (node.nodeType === 3) {
+        const text = node.nodeValue.trim();
+        if (text) {
+          const div = document.createElement("div");
+          div.innerHTML = `${pad}<span class="muted">"${sanitize(text)}"</span>`;
+          treeBox.appendChild(div);
+        }
+      }
+    };
+    build(xmlDoc.documentElement);
+    treeDiv.appendChild(treeBox);
+
+    // 2) show full JSON representation of extracted orders
+    const jsonBox = document.createElement("div");
+    jsonBox.style.marginTop = "10px";
+    jsonBox.innerHTML = `<strong>Extracted Orders JSON (complete)</strong>`;
+    const pre = document.createElement("pre");
+    pre.className = "json";
+    pre.textContent = JSON.stringify(orders, null, 2);
+    jsonBox.appendChild(pre);
+    treeDiv.appendChild(jsonBox);
+  }
+
+  // CSV/JSON exports
+  function download(filename, content, mime="text/plain") {
+    const blob = new Blob([content], {type: mime + ";charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportOrdersJSON(orders) {
+    download("orders.json", JSON.stringify(orders, null, 2), "application/json");
+  }
+
+  function exportOrdersCSV(orders) {
+    if (!orders.length) return alert("No orders to export.");
+    // Flatten order-level: id, orderDate, any _attributes keys and top-level direct keys
+    const headerSet = new Set(["_id","_orderDate"]);
+    orders.forEach(o => {
+      if (o._attributes) Object.keys(o._attributes).forEach(k=>headerSet.add(k));
+      if (o._direct) Object.keys(o._direct).forEach(k=>headerSet.add(k));
+    });
+    const headers = Array.from(headerSet);
+    const rows = [headers.join(",")];
+    orders.forEach(o => {
+      const row = headers.map(h => {
+        let v = "";
+        if (h === "_id") v = o._id || "";
+        else if (h === "_orderDate") v = o._orderDate || "";
+        else if (o._attributes && o._attributes[h]) v = o._attributes[h];
+        else if (o._direct && o._direct[h]) v = o._direct[h];
+        return `"${String(v).replace(/"/g,'""')}"`;
+      });
+      rows.push(row.join(","));
+    });
+    download("orders.csv", rows.join("\n"), "text/csv");
+  }
+
+  function exportItemsCSV(orders) {
+    // Produce rows with order id/date + item flattened columns
+    const rows = [];
+    const headerSet = new Set(["order_id","order_date"]);
+    orders.forEach(o => {
+      o._items && o._items.forEach(it => {
+        if (it._attributes) Object.keys(it._attributes).forEach(k=>headerSet.add(k));
+        Object.keys(it).forEach(k => { if (!k.startsWith("_")) headerSet.add(k); });
+      });
+    });
+    const headers = Array.from(headerSet);
+    rows.push(headers.join(","));
+    orders.forEach(o => {
+      (o._items || []).forEach(it => {
+        const r = headers.map(h => {
+          let v = "";
+          if (h === "order_id") v = o._id || "";
+          else if (h === "order_date") v = o._orderDate || "";
+          else if (it._attributes && it._attributes[h]) v = it._attributes[h];
+          else if (it[h]) v = it[h];
+          return `"${String(v).replace(/"/g,'""')}"`;
+        });
+        rows.push(r.join(","));
+      });
+    });
+    download("items.csv", rows.join("\n"), "text/csv");
+  }
+
+  // Parsing flow
+  let lastParsed = { xmlDoc: null, orders: [] };
+
+  function parseAndRender(xmlString) {
+    if (!xmlString.trim()) return alert("Please provide XML text (paste or load a file).");
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlString, "application/xml");
+    if (xmlDoc.getElementsByTagName("parsererror").length) {
+      const err = xmlDoc.getElementsByTagName("parsererror")[0].textContent;
+      return alert("XML parsing error: " + err);
+    }
+    const orders = extractOrders(xmlDoc);
+    lastParsed = { xmlDoc, orders };
+    $("summaryLine").textContent = `${orders.length} PurchaseOrder element(s) extracted.`;
+    $("counts").textContent = `Orders: ${orders.length} · Items: ${orders.reduce((s,o)=>s + (o._items ? o._items.length : 0),0)}`;
+    renderOrders(orders);
+    showTreeAndJson(xmlDoc, orders);
+  }
+
+  // Event handlers
+  window.addEventListener("DOMContentLoaded", () => {
+    $("xmlInput").value = ""; // blank initially; user chooses sample or file
+    $("loadSample").addEventListener("click", () => {
+      $("xmlInput").value = SAMPLE_XML;
+    });
+
+    $("fileInput").addEventListener("change", e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        $("xmlInput").value = ev.target.result;
+      };
+      reader.readAsText(f);
+    });
+
+    $("parseBtn").addEventListener("click", () => {
+      parseAndRender($("xmlInput").value);
+    });
+
+    $("treeBtn").addEventListener("click", () => {
+      if (!lastParsed.xmlDoc) return alert("Parse first to show tree.");
+      showTreeAndJson(lastParsed.xmlDoc, lastParsed.orders);
+    });
+
+    $("prettyBtn").addEventListener("click", () => {
+      const s = $("xmlInput").value;
+      if (!s.trim()) return;
+      try {
+        const p = new DOMParser().parseFromString(s, "application/xml");
+        if (p.getElementsByTagName("parsererror").length) return alert("Invalid XML - cannot pretty-print.");
+        // Simple pretty print
+        const out = formatXml(s);
+        $("xmlInput").value = out;
+      } catch (err) {
+        alert("Error formatting XML: " + err.message);
+      }
+    });
+
+    $("clearBtn").addEventListener("click", () => {
+      $("xmlInput").value = "";
+      $("poList").innerHTML = "";
+      $("treeView").innerHTML = "<div class='muted'>Tree and JSON output will appear here after parsing.</div>";
+      $("summaryLine").textContent = "No data parsed yet.";
+      lastParsed = { xmlDoc: null, orders: [] };
+    });
+
+    $("exportJsonBtn").addEventListener("click", () => {
+      if (!lastParsed.orders.length) return alert("Nothing parsed yet. Parse XML first.");
+      exportOrdersJSON(lastParsed.orders);
+    });
+    $("exportOrdersCsvBtn").addEventListener("click", () => {
+      if (!lastParsed.orders.length) return alert("Nothing parsed yet. Parse XML first.");
+      exportOrdersCSV(lastParsed.orders);
+    });
+    $("exportItemsCsvBtn").addEventListener("click", () => {
+      if (!lastParsed.orders.length) return alert("Nothing parsed yet. Parse XML first.");
+      exportItemsCSV(lastParsed.orders);
+    });
+
+    $("searchBox").addEventListener("input", e => {
+      const q = e.target.value.trim().toLowerCase();
+      if (!lastParsed.orders.length) return;
+      if (!q) renderOrders(lastParsed.orders);
+      else {
+        const filtered = lastParsed.orders.filter(o => {
+          const s = JSON.stringify(o).toLowerCase();
+          return s.includes(q);
+        });
+        $("summaryLine").textContent = `${filtered.length} matching PurchaseOrder(s)`;
+        renderOrders(filtered);
+      }
+    });
+  });
+
+  // Very small xml formatter for readability (not a full XML pretty-printer but adequate)
+  function formatXml(xml) {
+    const PADDING = "  ";
+    let reg = /(>)(<)(\/*)/g;
+    let xmlStr = xml.replace(/\r\n/g, "\n").replace(reg, "$1\n$2$3");
+    let pad = 0;
+    let formatted = '';
+    xmlStr.split('\n').forEach((node) => {
+      let indent = 0;
+      if (node.match( /.+<\/\w[^>]*>$/ )) {
+        indent = 0;
+      } else if (node.match( /^<\/\w/ )) {
+        if (pad !== 0) pad -= 1;
+      } else if (node.match( /^<\w([^>]*[^\/])?>.*$/ )) {
+        indent = 1;
+      } else {
+        indent = 0;
+      }
+
+      formatted += PADDING.repeat(pad) + node + '\n';
+      pad += indent;
+    });
+    return formatted.trim();
+  }
+  </script>
+</body>
+</html>
