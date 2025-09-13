@@ -1,12 +1,147 @@
-- 👋 Hi, I’m @dilip151984
-- 👀 I’m interested in ...
-- 🌱 I’m currently learning ...
-- 💞️ I’m looking to collaborate on ...
-- 📫 How to reach me ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>XML Content Extractor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        #output { margin-top: 2em; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+        th, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; }
+        th { background: #f0f0f0; }
+        .xml-tree { margin: 1em 0; padding-left: 2em; }
+        .xml-tag { color: #1a4e9a; font-weight: bold; }
+        .xml-value { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>XML Content Extractor</h1>
+    <input type="file" id="xmlFile" accept=".xml">
+    <button onclick="parseXML()">Extract & Organize</button>
+    <div id="output"></div>
 
-<!---
-dilip151984/dilip151984 is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
-You can click the Preview link to take a look at your changes.
---->
+    <script>
+        let xmlString = "";
+
+        document.getElementById('xmlFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                xmlString = e.target.result;
+            }
+            reader.readAsText(file);
+        });
+
+        function parseXML() {
+            if (!xmlString) {
+                document.getElementById('output').innerHTML = "<p>Please select an XML file first.</p>";
+                return;
+            }
+
+            let parser = new DOMParser();
+            let xmlDoc;
+            try {
+                xmlDoc = parser.parseFromString(xmlString, "application/xml");
+            } catch (e) {
+                document.getElementById('output').innerHTML = "<p>Invalid XML file.</p>";
+                return;
+            }
+
+            // Check for parsing errors
+            if (xmlDoc.getElementsByTagName("parsererror").length > 0) {
+                document.getElementById('output').innerHTML = "<p>Could not parse XML file.</p>";
+                return;
+            }
+
+            // Display XML content as a tree
+            let html = "<h2>XML Structure</h2>";
+            html += xmlToHtml(xmlDoc.documentElement);
+
+            // Try to display as a table if possible
+            html += tryToDisplayTable(xmlDoc);
+
+            document.getElementById('output').innerHTML = html;
+        }
+
+        function xmlToHtml(node, indent = 0) {
+            let html = `<div class="xml-tree" style="margin-left:${indent * 20}px">`;
+            html += `<span class="xml-tag">&lt;${node.nodeName}</span>`;
+
+            // Attributes
+            if (node.attributes && node.attributes.length > 0) {
+                for (let attr of node.attributes) {
+                    html += ` <span class="xml-tag">${attr.name}="<span class="xml-value">${attr.value}</span>"</span>`;
+                }
+            }
+            html += "<span class='xml-tag'>&gt;</span>";
+
+            // Children
+            if (node.childNodes.length === 1 && node.childNodes[0].nodeType === 3) { // Text node
+                html += ` <span class="xml-value">${node.childNodes[0].nodeValue.trim()}</span>`;
+            } else {
+                for (let child of node.childNodes) {
+                    if (child.nodeType === 1) { // Element
+                        html += xmlToHtml(child, indent + 1);
+                    } else if (child.nodeType === 3 && child.nodeValue.trim() !== "") { // Text
+                        html += ` <span class="xml-value">${child.nodeValue.trim()}</span>`;
+                    }
+                }
+            }
+            html += ` <span class="xml-tag">&lt;/${node.nodeName}&gt;</span></div>`;
+            return html;
+        }
+
+        // Try to organize repeated elements as a table
+        function tryToDisplayTable(xmlDoc) {
+            // Find repeated child elements
+            let root = xmlDoc.documentElement;
+            let children = Array.from(root.children);
+            if (children.length < 2) return ""; // not enough data for a table
+
+            // Find tagName that is repeated
+            let groups = {};
+            for (let child of children) {
+                groups[child.tagName] = (groups[child.tagName] || 0) + 1;
+            }
+            let repeatedTag = Object.keys(groups).find(tag => groups[tag] > 1);
+            if (!repeatedTag) return "";
+
+            let repeatedNodes = Array.from(root.getElementsByTagName(repeatedTag));
+            if (repeatedNodes.length < 2) return "";
+
+            // Get all unique child element names (columns)
+            let columns = new Set();
+            repeatedNodes.forEach(node => {
+                Array.from(node.children).forEach(child => columns.add(child.tagName));
+                // Also include attributes
+                Array.from(node.attributes).forEach(attr => columns.add("@" + attr.name));
+            });
+
+            if (columns.size === 0) return ""; // No columns to display
+
+            let html = `<h2>Organized Table: &lt;${repeatedTag}&gt; Elements</h2>`;
+            html += "<table><tr>";
+            html += `<th>#</th>`;
+            columns.forEach(col => html += `<th>${col.replace(/^@/, "attr:")}</th>`);
+            html += "</tr>";
+
+            repeatedNodes.forEach((node, idx) => {
+                html += `<tr><td>${idx + 1}</td>`;
+                columns.forEach(col => {
+                    if (col.startsWith('@')) {
+                        let attrName = col.slice(1);
+                        html += `<td>${node.getAttribute(attrName) || ""}</td>`;
+                    } else {
+                        let child = node.getElementsByTagName(col)[0];
+                        html += `<td>${child ? child.textContent : ""}</td>`;
+                    }
+                });
+                html += "</tr>";
+            });
+            html += "</table>";
+            return html;
+        }
+    </script>
+</body>
+</html>
